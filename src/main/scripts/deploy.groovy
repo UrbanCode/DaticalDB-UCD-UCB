@@ -1,9 +1,9 @@
 import com.urbancode.air.CommandHelper;
 
-final def inputPropsFile = new File(args[0])
-final def outputPropsFile = new File(args[1])
+def inputPropsFile = new File(args[0])
+def outputPropsFile = new File(args[1])
 
-final def props = new Properties()
+def props = new Properties()
 try {
     props.load(new FileInputStream(inputPropsFile))
 }
@@ -11,8 +11,8 @@ catch (IOException e) {
     throw new RuntimeException(e)
 }
 
-final def cwd = new File('.');
-final def cmdHelper = new CommandHelper(cwd);
+def cwd = new File('.');
+def cmdHelper = new CommandHelper(cwd);
 
 //--------------------------------------------------------------------------------------------------
 def getAbsPath(def file) {
