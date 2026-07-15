@@ -1,0 +1,243 @@
+plugins {
+    id 'java'
+    id 'groovy'
+}
+
+defaultTasks 'main'
+
+version = providers.gradleProperty('version').getOrElse('dev')
+
+ext {
+    pluginName = 'DaticalDB-UCD-UCB'
+
+    releasesDir = file("$projectDir/releases")
+    libDir = file("$projectDir/lib")
+
+    libBuildDir = file("$projectDir/lib/build")
+    libTestDir = file("$projectDir/lib/test")
+
+    libBuildClassesDir = file("$projectDir/lib/build/classes")
+    buildJavaDir = file("$buildDir/java")
+    buildPluginDir = file("$buildDir/plugin")
+    srcMainScriptsDir = file("$projectDir/src/main/scripts")
+    srcMainGroovyDir = file("$projectDir/src/main/groovy")
+    buildLife = providers.gradleProperty('buildLife').getOrElse('dev')
+    
+    libTestJavaDir = file("$projectDir/lib/test/java")
+}
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    buildConf
+    testConf
+}
+
+dependencies {
+    runtimeOnly 'com.ibm.urbancode.plugins:groovy-plugin-utils:1.0'
+    buildConf 'org.codehaus.groovy:groovy-all:1.8.8'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.hamcrest:hamcrest-core:1.3'
+
+    testConf 'junit:junit:4.13.2'
+    testConf 'org.hamcrest:hamcrest-core:1.3'
+}
+
+sourceSets {
+    main {
+        java.srcDirs = ['src/main/java']
+        groovy.srcDirs = ['src/main/groovy']
+    }
+
+    test {
+        java.srcDirs = ['src/test/java']
+        groovy.srcDirs = ['src/test/groovy']
+    }
+}
+
+tasks.register('main') {
+    dependsOn 'cleanBuild', 'resolve', 'compileClasses', 'buildPlugin', 'dist', 'runTests'
+    doLast {
+        println 'Plugin build complete!'
+    }
+}
+
+tasks.register('cleanBuild') {
+    description 'Clean build directory, releases directory, and lib directory'
+    delete buildDir
+    delete releasesDir
+    delete libDir
+
+    doLast {
+        mkdir buildDir
+    }
+}
+
+tasks.register('resolve') {
+    dependsOn 'cleanBuild'
+
+    doFirst {
+        mkdir libDir
+        mkdir libBuildDir
+        mkdir libTestDir
+    }
+
+    doLast {
+        copy {
+            from configurations.runtimeClasspath
+            into libDir
+        }
+
+        copy {
+            from configurations.buildConf
+            into libBuildDir
+        }
+
+        copy {
+            from configurations.testConf
+            into libTestDir
+        }
+    }
+}
+
+tasks.register('compileClasses') {
+
+    dependsOn 'resolve', 'compileJava', 'compileGroovy'
+
+    onlyIf {
+        !project.hasProperty('compile.no')
+    }
+
+    doLast {
+
+        // Equivalent of <mkdir dir="${lib.build.classes.dir}"/>
+        mkdir libBuildClassesDir
+
+        // Copy compiled Java and Groovy classes
+        copy {
+            from sourceSets.main.output.classesDirs
+            into libBuildClassesDir
+        }
+
+        println "Groovy and Java classes compiled successfully."
+    }
+}
+
+
+tasks.register('buildPlugin') {
+
+    dependsOn 'resolve', 'compileClasses'
+
+    doLast {
+
+        // Create plugin directory
+        mkdir buildPluginDir
+
+        // Copy plugin metadata files
+        copy {
+            from('plugin') {
+                include 'info.xml'
+                include 'upgrade.xml'
+                include 'plugin.xml'
+            }
+            into buildPluginDir
+        }
+
+        // Copy scripts
+        copy {
+            from(srcMainScriptsDir)
+            into buildPluginDir
+        }
+
+        // Replace #RELEASE_VERSION# in info.xml
+        ant.replace(
+                file: "$buildPluginDir/info.xml",
+                token: "#RELEASE_VERSION#",
+                value: "${version}.${buildLife}"
+        )
+
+        // Copy license
+        copy {
+            from('license')
+            into "$buildPluginDir/license"
+        }
+
+        // Copy documentation
+        copy {
+            from('doc')
+            into "$buildPluginDir/doc"
+        }
+
+        // Copy libraries
+        copy {
+            from('lib') {
+                exclude '**/build/**'
+                exclude '**/test/**'
+            }
+            into "$buildPluginDir/lib"
+        }
+
+        // Create classes directory
+        mkdir "$buildPluginDir/classes"
+
+        // Copy Groovy source files
+        copy {
+            from(srcMainGroovyDir) {
+                include '**/*.groovy'
+            }
+            into "$buildPluginDir/classes"
+        }
+
+        // Copy compiled Java/Groovy classes
+        copy {
+            from(libBuildClassesDir) {
+                include '**/*.class'
+            }
+            into "$buildPluginDir/classes"
+        }
+    }
+}
+
+tasks.register('dist', Zip) {
+    description = 'Create distribution zip'
+    dependsOn 'resolve', 'buildPlugin'
+    archiveFileName = "${pluginName}-v${version}.zip"
+    destinationDirectory = releasesDir
+    from buildPluginDir
+    doLast {
+        println '[zip] Building zip: ' + file("$releasesDir/${pluginName}-v${version}.zip")
+    }
+}
+
+tasks.register('runTests') {
+    description = 'Compile and run JUnit tests ()'
+    dependsOn 'compileTests', 'test'
+}
+
+tasks.register('compileTests') {
+    description = 'Compile test Java classes (equivalent to Ant compile-tests)'
+    dependsOn 'compileClasses', 'compileTestJava'
+}
+
+test {
+    useJUnit()
+
+    reports {
+        junitXml.required = true
+        html.required = true
+
+        junitXml.outputLocation = layout.projectDirectory.dir("releases/report/xml")
+        html.outputLocation = layout.projectDirectory.dir("releases/report/html")
+    }
+
+    testLogging {
+        events "passed", "failed", "skipped"
+    }
+}
+
+
+
+
